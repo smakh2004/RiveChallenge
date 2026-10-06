@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rive Game</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Stage keeps the 1920x1427 ratio and is centered in the window -->
+  <div id="stage">
+    <canvas id="menuCanvas" class="layer"></canvas>
+    <canvas id="gameCanvas" class="layer hidden"></canvas>
+    <canvas id="instructionsCanvas" class="layer hidden"></canvas>
+    <canvas id="transitionCanvas" class="layer top hidden"></canvas>
+  </div>
+
+  <div id="loading">Loading...</div>
+
+  <!-- Rive Renderer (WebGL2). GPU Canvas (shaders) needs 2.42.0 or newer -->
+  <script src="https://unpkg.com/@rive-app/webgl2@^2.42.0"></script>
+  <script src="script.js"></script>
+</body>
+</html>
