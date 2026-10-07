@@ -51,8 +51,10 @@ const POSITION_PROPS = ["position 1 zombie", "position 2 zombie", "position 3 zo
 const GAIN_REQUEST_PROPS = ["gain request 1", "gain request 2", "gain request 3", "gain request 4"];
 // Fired by this script only when sharing is allowed (Rive reacts to these)
 const GAIN_PROPS = ["gain energy 1", "gain energy 2", "gain energy 3", "gain energy 4"];
-// How long after "gain energy N" the script makes sure an empty neighbour isn't drained
+// How long after "gain energy N" the script keeps the share rules enforced
+// (empty neighbour stays at 0, nobody goes above MAX_ENERGY)
 const SHARE_GUARD_MS = 1500;
+const MAX_ENERGY = 100;            // a zombie can never have more energy than this
 const SWEET_PROP = "sweet";
 const RESULT_CHECK_INTERVAL = 100; // ms between win/lose checks
 const RESULT_DELAY = 3500;         // ms to wait after win/lose before the transition starts
@@ -240,6 +242,8 @@ function listenForExits(name, r) {
 // - At least one neighbour has energy -> "gain energy N" fires, but energy is
 //   only taken from neighbours that have it (an empty neighbour stays at 0).
 // - No neighbour with energy -> nothing happens.
+// - Zombie already at MAX_ENERGY -> nothing happens.
+// - A share never pushes a zombie above MAX_ENERGY; the extra stays with the giver.
 function handleGainRequests(r) {
   const vmi = r.viewModelInstance;
   if (!vmi) return;
@@ -262,6 +266,11 @@ function handleGainRequests(r) {
     }
 
     request.on(() => {
+      if (energies[i].value >= MAX_ENERGY) {
+        console.log("'" + GAIN_PROPS[i] + "' not fired: zombie " + (i + 1) + " already has " + MAX_ENERGY + " energy");
+        return;
+      }
+
       const myPos = positions[i].value;
 
       const sameSpotNeighbours = [i - 1, i + 1].filter(
@@ -275,6 +284,9 @@ function handleGainRequests(r) {
         return;
       }
 
+      // energy of the givers before the share, to give back anything above MAX_ENERGY
+      const before = energies.map((p) => p.value);
+
       gain.trigger();
 
       if (empty.length > 0) {
@@ -283,20 +295,23 @@ function handleGainRequests(r) {
           givers.map((n) => n + 1).join(", ") +
           " (zombie " + empty.map((n) => n + 1).join(", ") + " has 0 energy)"
         );
-        protectEmptyNeighbours(energies, i, empty);
       }
+      guardShare(energies, i, givers, empty, before);
     });
   });
 }
 
-// Keeps empty neighbours at 0 while Rive runs the share.
-// If Rive also takes from an empty neighbour (it goes below 0), that amount
-// is put back to the neighbour and removed from the zombie that gained it,
-// so energy only really comes from the neighbour that had it.
-function protectEmptyNeighbours(energies, gainer, empty) {
+// Enforces the share rules while Rive runs the share:
+// 1. Empty neighbour: if Rive takes from it (it goes below 0), that amount is
+//    put back and removed from the zombie that gained it.
+// 2. Max energy: if the gaining zombie goes above MAX_ENERGY, the extra is
+//    given back to the neighbours it came from (never more than they lost).
+function guardShare(energies, gainer, givers, empty, before) {
   const until = performance.now() + SHARE_GUARD_MS;
+  let capLogged = false;
 
   const guard = () => {
+    // 1. empty neighbours stay at 0
     empty.forEach((n) => {
       const v = energies[n].value;
       if (v < 0) {
@@ -304,6 +319,24 @@ function protectEmptyNeighbours(energies, gainer, empty) {
         energies[gainer].value = energies[gainer].value + v; // v is negative
       }
     });
+
+    // 2. gainer never above MAX_ENERGY, extra goes back to the givers
+    let extra = energies[gainer].value - MAX_ENERGY;
+    if (extra > 0) {
+      energies[gainer].value = MAX_ENERGY;
+      givers.forEach((g) => {
+        if (extra <= 0) return;
+        const lost = before[g] - energies[g].value;
+        const back = Math.min(Math.max(lost, 0), extra);
+        energies[g].value = energies[g].value + back;
+        extra -= back;
+      });
+      if (!capLogged) {
+        console.log("Zombie " + (gainer + 1) + " capped at " + MAX_ENERGY + " energy, extra returned");
+        capLogged = true;
+      }
+    }
+
     if (performance.now() < until) requestAnimationFrame(guard);
   };
 
