@@ -43,10 +43,14 @@ const LOADING_TRIGGER = "loading";    // normal navigation
 const LOSE_TRIGGER = "lose";          // game lost
 const WIN_TRIGGER = "win";            // game won
 
-// Game result values in game.riv's view model
+// Game values in game.riv's view model
 // (extra spaces at the start/end of names in Rive are ignored)
 const ENERGY_PROPS = ["energy zombie 1", "energy zombie 2", "energy zombie 3", "energy zombie 4"];
 const POSITION_PROPS = ["position 1 zombie", "position 2 zombie", "position 3 zombie", "position 4 zombie"];
+// Fired by the zombie click listeners in Rive (the "ask")
+const GAIN_REQUEST_PROPS = ["gain request 1", "gain request 2", "gain request 3", "gain request 4"];
+// Fired by this script only when sharing is allowed (Rive reacts to these)
+const GAIN_PROPS = ["gain energy 1", "gain energy 2", "gain energy 3", "gain energy 4"];
 const SWEET_PROP = "sweet";
 const RESULT_CHECK_INTERVAL = 100; // ms between win/lose checks
 const RESULT_DELAY = 3500;         // ms to wait after win/lose before the transition starts
@@ -191,7 +195,10 @@ function showScene(name, onLoad) {
   const r = createRive(name, scene.canvas, (instance) => {
     fadeIn(scene.canvas);
     listenForExits(name, instance);
-    if (name === "game") watchGameResult(instance);
+    if (name === "game") {
+      handleGainRequests(instance);
+      watchGameResult(instance);
+    }
     if (onLoad) onLoad(instance);
   });
 
@@ -222,6 +229,53 @@ function listenForExits(name, r) {
       return;
     }
     trigger.on(() => navigateTo(exit.goesTo));
+  });
+}
+
+// ---------- Energy sharing in game.riv ----------
+// Rive fires "gain request N" when zombie N is clicked.
+// This script fires "gain energy N" ONLY if no neighbour zombie
+// on the same position has 0 energy. Otherwise nothing happens.
+function handleGainRequests(r) {
+  const vmi = r.viewModelInstance;
+  if (!vmi) return;
+
+  const energies = ENERGY_PROPS.map((p) => getNumber(vmi, p));
+  const positions = POSITION_PROPS.map((p) => getNumber(vmi, p));
+  if (energies.includes(null) || positions.includes(null)) return; // watchGameResult logs missing names
+
+  GAIN_REQUEST_PROPS.forEach((requestName, i) => {
+    const request = getTrigger(vmi, requestName);
+    const gain = getTrigger(vmi, GAIN_PROPS[i]);
+
+    if (!request) {
+      console.warn("No trigger named '" + requestName + "' in game.riv view model");
+      return;
+    }
+    if (!gain) {
+      console.warn("No trigger named '" + GAIN_PROPS[i] + "' in game.riv view model");
+      return;
+    }
+
+    request.on(() => {
+      const myPos = positions[i].value;
+
+      // neighbours = zombie above and below, only if on the same position
+      const sameSpotNeighbours = [i - 1, i + 1].filter(
+        (n) => n >= 0 && n < 4 && positions[n].value === myPos
+      );
+
+      const emptyNeighbour = sameSpotNeighbours.find((n) => energies[n].value <= 0);
+      if (emptyNeighbour !== undefined) {
+        console.log(
+          "'" + GAIN_PROPS[i] + "' not fired: zombie " + (emptyNeighbour + 1) +
+          " on the same position has 0 energy"
+        );
+        return;
+      }
+
+      gain.trigger();
+    });
   });
 }
 
